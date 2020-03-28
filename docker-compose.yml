@@ -1,0 +1,16 @@
+version: '2.1'
+
+services:
+  downloader:
+    build: downloader
+    container_name: dtkd_downloader
+    hostname: dtkd_downloader
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "2"
+    volumes:
+      - ./downloader:/src
+      - ./data:/data
+    command: python3 main.py

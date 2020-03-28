@@ -1,0 +1,5 @@
+.DS_Store
+data/*.rss
+data/*.txt
+data/files
+
