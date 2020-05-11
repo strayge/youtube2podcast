@@ -16,3 +16,16 @@ services:
     command: python3 main.py
     env_file:
       - .env
+
+  cron:
+    build: ofelia
+    container_name: dtkd_cron
+    hostname: dtkd_cron
+    depends_on:
+      - downloader
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      ofelia.job-local.cron.schedule: "0 0 9 * *"
+      ofelia.job-local.cron.command: "docker start dtkd_downloader"
