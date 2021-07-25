@@ -13,7 +13,7 @@ services:
     volumes:
       - ./downloader:/src
       - ./data:/data
-    command: python3 main.py
+    command: /bin/sh -c 'pip3 install --disable-pip-version-check -U youtube-dl && python3 main.py'
     env_file:
       - .env
 

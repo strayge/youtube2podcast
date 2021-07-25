@@ -6,44 +6,37 @@ from datetime import datetime, timezone
 from urllib.parse import urljoin, quote
 from feedgen.feed import FeedGenerator
 
-
-playlist_url = os.environ['PLAYLIST_URL']
-rss_name = os.environ['RSS_FILENAME']
-external_url_to_files = os.environ['EXTERNAL_URL_TO_FILES']
-podcast_title = os.environ['PODCAST_TITLE']
-podcast_description = os.environ['PODCAST_DESCRIPTION']
-podcast_url = os.environ['PODCAST_URL']
-episodes_limit = int(os.environ['EPISODES_LIMIT'])
-
-data_path = '/data'
-files_path = os.path.join(data_path, 'files')
-last_title_filename = os.path.join(data_path, 'last.txt')
-rss_filename = os.path.join(files_path, rss_name)
+EXTERNAL_URL_TO_FILES = os.environ['EXTERNAL_URL_TO_FILES']
+DATA_PATH = '/data'
 
 
-def get_playlist():
+def get_playlist(playlist_url):
     res = subprocess.run(f'youtube-dl "{playlist_url}" --flat-playlist -J', shell=True, check=True, capture_output=True)
     playlist_info = json.loads(res.stdout.decode())
     return playlist_info
 
-def get_media_files():
-    files = [f for f in os.listdir(files_path) if f != rss_name]
+def get_media_files(files_path):
+    files = [f for f in os.listdir(files_path) if not f.endswith('.rss') and not f.endswith('.txt')]
     files_with_ts = [(name, os.path.getmtime(os.path.join(files_path, name))) for name in files]
     files_with_ts_sorted = sorted(files_with_ts, key=lambda x: x[1], reverse=True)
     files_sorted = [x[0] for x in files_with_ts_sorted]
     return files_sorted
 
 
-def download():
+def download(playlist_url, files_path, episodes_limit=1):
     print('downloading...')
-    res = subprocess.run(f'youtube-dl "{playlist_url}" --playlist-items 1 -f bestaudio -o "/data/files/%(title)s.%(ext)s"', shell=True, check=True, capture_output=True)
+    if not os.path.exists(files_path):
+        os.mkdir(files_path)
+    res = subprocess.run(f'youtube-dl "{playlist_url}" --playlist-items 1 -f bestaudio -o "{files_path}/%(title)s.%(ext)s"', shell=True, check=True, capture_output=True, timeout=180)
     print('downloaded, cleaning...')
-    files = get_media_files()
+    files = get_media_files(files_path=files_path)
     passed = 0
     deleted = 0
     for name in files:
         if name.endswith('.part'):
             os.remove(os.path.join(files_path, name))
+            continue
+        if name.endswith('.rss') or name.endswith('.txt'):
             continue
         passed += 1
         if episodes_limit and passed > episodes_limit:
@@ -56,21 +49,21 @@ def get_last_title(playlist):
     return playlist.get('entries', [''])[0].get('title')
 
 
-def get_downloaded_title() -> str:
+def get_downloaded_title(last_title_filename) -> str:
     if not os.path.exists(last_title_filename):
         return ''
     with open(last_title_filename, 'rt') as f:
         return f.read()
 
 
-def set_downloaded_title(title):
+def set_downloaded_title(last_title_filename, title):
     with open(last_title_filename, 'wt') as f:
         return f.write(title)
 
 
-def generate_rss():
+def generate_rss(podcast_title, podcast_description, podcast_url, files_path, rss_filename, rss_name):
     print('generating rss...')
-    files = get_media_files()
+    files = get_media_files(files_path=files_path)
 
     fg = FeedGenerator()
     fg.title(podcast_title)
@@ -80,7 +73,7 @@ def generate_rss():
 
     for file in files:
         name, ext = file.rsplit('.', 1)
-        url = urljoin(external_url_to_files, quote(file))
+        url = urljoin(urljoin(EXTERNAL_URL_TO_FILES, quote(rss_name)) + '/', quote(file))
         mod_time_unix = os.path.getmtime(os.path.join(files_path, file))
         mod_time = datetime.fromtimestamp(mod_time_unix).replace(tzinfo=timezone.utc)
         entry_id = str(uuid.uuid5(uuid.NAMESPACE_URL, name))
@@ -96,15 +89,37 @@ def generate_rss():
 
 def main():
     print('===== start =====')
-    
-    playlist = get_playlist()
-    current_last_title = get_last_title(playlist)
-    last_downloaded_title = get_downloaded_title()
-    if current_last_title and current_last_title != last_downloaded_title:
-        print(f'new founded: {current_last_title}')
-        download()
-        set_downloaded_title(current_last_title)
-        generate_rss()
+    for i in range(1, 11):
+        playlist_url = os.environ.get(f'PLAYLIST_URL_{i}')
+        if not playlist_url:
+            continue
+        podcast_url = os.environ.get(f'PODCAST_URL_{i}', playlist_url)
+        rss_name = os.environ[f'RSS_NAME_{i}']
+        podcast_title = os.environ[f'PODCAST_TITLE_{i}']
+        podcast_description = os.environ.get(f'PODCAST_DESCRIPTION_{i}', podcast_title)
+        episodes_limit = int(os.environ.get(f'EPISODES_LIMIT_{i}', os.environ.get('EPISODES_LIMIT')))
+        files_path = os.path.join(DATA_PATH, rss_name)
+        last_title_filename = os.path.join(DATA_PATH, f'{rss_name}_last.txt')
+        rss_filename = os.path.join(DATA_PATH, rss_name + '.rss')
+
+        print(f'processing {rss_name}...')
+
+        playlist = get_playlist(playlist_url)
+        current_last_title = get_last_title(playlist)
+        last_downloaded_title = get_downloaded_title(last_title_filename)
+
+        if current_last_title and current_last_title != last_downloaded_title:
+            print(f'new founded: {current_last_title}')
+            download(playlist_url, files_path, episodes_limit)
+            set_downloaded_title(last_title_filename, current_last_title)
+            generate_rss(
+                podcast_title=podcast_title, 
+                podcast_description=podcast_description, 
+                podcast_url=podcast_url, 
+                files_path=files_path, 
+                rss_filename=rss_filename,
+                rss_name=rss_name,
+            )
     print('===== end =====')
 
 if __name__ == '__main__':
